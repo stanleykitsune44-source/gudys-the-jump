@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gudys: The Jump</title>
+<style>
+/* ===== GLOBAL ===== */
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{
+  width:100%;height:100%;
+  overflow:hidden;
+  background:#05050a;
+  font-family:'Rajdhani','Courier New',monospace;
+  color:#00ffff;
+  user-select:none;
+}
+canvas{
+  display:block;
+  width:100%;
+  height:100%;
+}
+
+/* ===== UI ===== */
+.ui-container{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;}
+.score-display,.best-score-display{
+  position:absolute;left:20px;
+  font-weight:bold;letter-spacing:2px;
+  text-shadow:0 0 10px #00ffff,0 0 20px #0088ff;
+}
+.score-display{top:20px;font-size:22px;}
+.best-score-display{top:55px;font-size:18px;color:#ff00ff;text-shadow:0 0 10px #ff00ff;}
+.menu-overlay,.game-over-overlay,.credits-overlay{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  display:flex;flex-direction:column;justify-content:center;align-items:center;
+  background:rgba(5,5,15,0.95);
+  transition:opacity .5s ease;
+  z-index:20;
+}
+.menu-overlay.hidden,.credits-overlay.hidden{opacity:0;pointer-events:none;}
+.menu-title{
+  font-size:70px;font-weight:bold;margin-bottom:10px;color:#00ffff;
+  text-shadow:0 0 30px #00ffff,0 0 60px #0088ff;
+  animation:glow 2s infinite alternate;
+}
+.menu-subtitle{
+  font-size:24px;color:#ff00ff;text-shadow:0 0 15px #ff00ff;margin-bottom:40px;
+}
+.menu-buttons{display:flex;flex-direction:column;gap:20px;}
+.menu-button{
+  padding:15px 40px;font-size:22px;font-weight:bold;
+  background:linear-gradient(135deg,#00ffff,#0088ff);
+  border:2px solid #00ffff;border-radius:8px;
+  color:#000;cursor:pointer;text-transform:uppercase;
+  box-shadow:0 0 15px #00ffff,inset 0 0 15px rgba(0,255,255,0.2);
+  transition:all .3s;
+}
+.menu-button:hover{transform:scale(1.05);}
+.menu-button.play{background:linear-gradient(135deg,#00ff88,#00ffff);}
+.menu-button.credits{background:linear-gradient(135deg,#ff00ff,#aa00ff);color:#fff;}
+.game-over-overlay{opacity:0;pointer-events:none;}
+.game-over-overlay.visible{opacity:1;pointer-events:auto;}
+.game-over-title{
+  font-size:60px;font-weight:bold;color:#ff0055;
+  text-shadow:0 0 20px #ff0055,0 0 40px #ff0033;
+  animation:glowRed 1.5s infinite alternate;
+}
+.stat-line{font-size:24px;color:#00ffff;text-shadow:0 0 10px #00ffff;margin-bottom:10px;}
+.credits-content{text-align:center;max-width:600px;color:#00ffff;}
+.credits-title{font-size:48px;color:#ff00ff;text-shadow:0 0 20px #ff00ff;margin-bottom:20px;}
+.back-button{padding:12px 30px;background:linear-gradient(135deg,#ff00ff,#aa00ff);border:none;border-radius:8px;color:#fff;font-size:18px;font-weight:bold;cursor:pointer;box-shadow:0 0 20px #ff00ff;}
+
+/* ===== ANIMATIONS ===== */
+@keyframes glow{from{text-shadow:0 0 20px #00ffff;}to{text-shadow:0 0 60px #00ffff,0 0 100px #0088ff;}}
+@keyframes glowRed{from{text-shadow:0 0 20px #ff0055;}to{text-shadow:0 0 50px #ff2255;}}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<div class="ui-container">
+  <div class="score-display">SCORE: <span id="scoreValue">0</span></div>
+  <div class="best-score-display">BEST: <span id="bestScoreValue">0</span></div>
+</div>
+
+<!-- MENU -->
+<div class="menu-overlay" id="menuOverlay">
+  <div class="menu-title">GUDYS</div>
+  <div class="menu-subtitle">THE JUMP</div>
+  <div class="menu-buttons">
+    <button class="menu-button play" id="playButton">COMEÇAR</button>
+    <button class="menu-button credits" id="creditsButton">CRÉDITOS</button>
+  </div>
+</div>
+
+<!-- GAME OVER -->
+<div class="game-over-overlay" id="gameOverOverlay">
+  <div class="game-over-title">SYSTEM FAILURE</div>
+  <div class="stat-line">FINAL SCORE: <span id="finalScore">0</span></div>
+  <div class="stat-line">BEST: <span id="bestScore">0</span></div>
+  <button class="menu-button play" id="restartButton">RECOMEÇAR</button>
+</div>
+
+<!-- CREDITS -->
+<div class="credits-overlay hidden" id="creditsOverlay">
+  <div class="credits-content">
+    <div class="credits-title">CRÉDITOS</div>
+    <p>Demo do jogo <strong>Gudys: The Jump</strong><br>
+    Criado em HTML5 + Canvas.<br><br>
+    Inspirado em jogos retrô de plataforma futurista.<br><br>
+    Criado em 2025 🚀</p>
+    <button class="back-button" id="backButton">VOLTAR</button>
+  </div>
+</div>
+
+<script>
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+canvas.width=innerWidth;canvas.height=innerHeight;
+
+const GAME_STATE={MENU:"menu",PLAY:"play",OVER:"over",CREDITS:"credits"};
+let state=GAME_STATE.MENU,score=0,best=localStorage.getItem("bestScore")||0;
+
+const player={x:0,y:0,w:15,h:15,vy:0,vx:0};
+const config={g:1,jump:20,platformH:10,space:80,lavaSpeed:3};
+let camY=0,lavaY=0,platforms=[],particles=[];
+
+function init(){
+  state=GAME_STATE.PLAY;
+  score=0;camY=0;lavaY=canvas.height+150;
+  player.x=canvas.width/2;player.y=canvas.height-200;player.vy=0;player.vx=0;
+  platforms=[];particles=[];
+  for(let i=0;i<12;i++)platforms.push(genPlat(i*config.space));
+  document.getElementById("menuOverlay").classList.add("hidden");
+  document.getElementById("gameOverOverlay").classList.remove("visible");
+}
+
+// ======= PLATAFORMAS =======
+function genPlat(y){
+  const w=Math.random()*(90-45)+45;
+  let type="normal";
+  const rand=Math.random();
+  if(rand>0.9) type="energy";
+  else if(rand>0.75) type="special";
+  return{x:Math.random()*(canvas.width-w),y,width:w,height:config.platformH,type};
+}
+
+// ======= LOOP DO JOGO =======
+let speedFactor = 0.5; // velocidade inicial mais lenta
+function update(){
+  if(state!==GAME_STATE.PLAY)return;
+
+  // Aumenta gradualmente a velocidade conforme o jogador sobe
+  speedFactor = 0.5 + Math.min(score / 1000, 1.5); // início lento, aumenta devagar
+
+  // Gravidade e movimento do jogador ajustados pelo speedFactor
+  player.vy += config.g * speedFactor * 0.8; // gravidade mais suave
+  player.y += player.vy;
+  player.x += player.vx * speedFactor;
+  player.vx *= 0.95;
+
+  camY = player.y - canvas.height/3;
+
+  if(platforms[platforms.length-1].y > camY - canvas.height)
+    platforms.push(genPlat(platforms[platforms.length-1].y - config.space));
+
+  platforms = platforms.filter(p => p.y < camY + canvas.height + 100);
+
+  // COLISÃO
+  for(let p of platforms){
+    if(player.vy>0 && player.y+player.h <= p.y+10 && player.y+player.h+player.vy >= p.y && player.x+player.w>p.x && player.x<p.x+p.width){
+      if(p.type==="energy"){
+        player.vy = -config.jump * 1.6;
+        makeParticles(player.x+player.w/2, player.y, 20);
+        flashScreen("#ffff33", 200);
+      } else if(p.type==="special"){
+        player.vy = -config.jump * 1.3;
+        makeParticles(player.x+player.w/2, player.y, 10);
+      } else {
+        player.vy = -config.jump;
+        makeParticles(player.x+player.w/2, player.y, 6);
+      }
+      score = Math.max(score, Math.floor(player.y/10));
+      document.getElementById("scoreValue").textContent = score;
+    }
+  }
+
+  lavaY += config.lavaSpeed * speedFactor;
+  if(player.y > lavaY) end();
+
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.15;
+    p.life -= 2;
+  });
+  particles = particles.filter(p => p.life > 0);
+}
+
+// ======= PARTÍCULAS =======
+function makeParticles(x,y,n){for(let i=0;i<n;i++){particles.push({x,y,vx:(Math.random()-0.5)*4,vy:-Math.random()*3,life:255,color:['#00ffff','#00ff88','#ff00ff','#ffff33'][Math.floor(Math.random()*4)]});}}
+
+// ======= DESENHO =======
+function draw(){
+  let grad=ctx.createLinearGradient(0,0,0,canvas.height);
+  grad.addColorStop(0,"#03030a");grad.addColorStop(0.5,"#0a0033");grad.addColorStop(1,"#000010");
+  ctx.fillStyle=grad;ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(state===GAME_STATE.PLAY){
+    drawBgGlow();
+    platforms.forEach(drawPlat);
+    drawPlayer();
+    particles.forEach(drawParticle);
+    drawLava();
+  }
+}
+function drawBgGlow(){
+  for(let i=0;i<40;i++){
+    const x=(i*50+(camY*0.2))%canvas.width;
+    const y=((i*60)-(camY%canvas.height))%canvas.height;
+    ctx.fillStyle=`rgba(0,255,255,${0.2+Math.sin(i+camY*0.01)*0.1})`;
+    ctx.fillRect(x,y,2,2);
+  }
+}
+function drawPlat(p){
+  const y=p.y-camY;
+  if(y<-100||y>canvas.height+100)return;
+
+  let glow,g;
+  if(p.type==="energy"){
+    glow="#ffff33";
+    ctx.shadowColor=glow;ctx.shadowBlur=25;
+    g=ctx.createLinearGradient(p.x,y,p.x,y+p.height);
+    g.addColorStop(0,"#ffff99");
+    g.addColorStop(1,"#ffaa00");
+  }else if(p.type==="special"){
+    glow="#ff00ff";
+    ctx.shadowColor=glow;ctx.shadowBlur=15;
+    g=ctx.createLinearGradient(p.x,y,p.x,y+p.height);
+    g.addColorStop(0,"#ff00ff");
+    g.addColorStop(1,"#aa00ff");
+  }else{
+    glow="#00ffff";
+    ctx.shadowColor=glow;ctx.shadowBlur=15;
+    g=ctx.createLinearGradient(p.x,y,p.x,y+p.height);
+    g.addColorStop(0,"#00ffff");
+    g.addColorStop(1,"#0088ff");
+  }
+
+  ctx.fillStyle=g;
+  ctx.fillRect(p.x,y,p.width,p.height);
+  ctx.shadowBlur=0;
+}
+function drawPlayer(){
+  const y=player.y-camY;
+  const r=player.w/2;
+  ctx.shadowColor='#00ffcc';ctx.shadowBlur=30;
+  const g=ctx.createRadialGradient(player.x+r,y+r,0,player.x+r,y+r,r);
+  g.addColorStop(0,'#ffffff');g.addColorStop(0.4,'#00ffff');g.addColorStop(1,'#0066aa');
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.arc(player.x+r,y+r,r,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='rgba(0,255,255,0.4)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(player.x+r,y+r,r+3+Math.sin(Date.now()*0.005)*2,0,Math.PI*2);ctx.stroke();
+}
+function drawParticle(p){
+  const y=p.y-camY;
+  ctx.globalAlpha=p.life/255;
+  ctx.fillStyle=p.color;
+  ctx.beginPath();ctx.arc(p.x,y,2,0,Math.PI*2);ctx.fill();
+  ctx.globalAlpha=1;
+}
+function drawLava(){
+  const y=lavaY-camY;
+  ctx.beginPath();ctx.moveTo(0,y);
+  for(let x=0;x<=canvas.width;x+=10){
+    const wave=Math.sin(x*0.02+lavaY*0.03)*15;
+    ctx.lineTo(x,y+wave);
+  }
+  ctx.lineTo(canvas.width,canvas.height);
+  ctx.lineTo(0,canvas.height);
+  ctx.closePath();
+  const g=ctx.createLinearGradient(0,y-20,0,y+60);
+  g.addColorStop(0,'rgba(255,50,0,0.4)');
+  g.addColorStop(0.5,'rgba(255,0,80,0.6)');
+  g.addColorStop(1,'rgba(255,0,100,0.9)');
+  ctx.fillStyle=g;ctx.fill();
+  ctx.shadowColor='#ff0044';ctx.shadowBlur=50;
+  ctx.strokeStyle='rgba(255,0,85,0.9)';
+  ctx.lineWidth=3;ctx.stroke();
+  ctx.shadowBlur=0;
+}
+
+// ======= FIM DE JOGO =======
+function end(){
+  state=GAME_STATE.OVER;
+  if(score>best){best=score;localStorage.setItem("bestScore",best);}
+  document.getElementById("finalScore").textContent=score;
+  document.getElementById("bestScore").textContent=best;
+  document.getElementById("bestScoreValue").textContent=best;
+  document.getElementById("gameOverOverlay").classList.add("visible");
+}
+
+// ======= FLASH DE ENERGIA =======
+function flashScreen(color,duration){
+  const overlay=document.createElement("div");
+  overlay.style.position="fixed";
+  overlay.style.top=0;
+  overlay.style.left=0;
+  overlay.style.width="100%";
+  overlay.style.height="100%";
+  overlay.style.background=color;
+  overlay.style.opacity="0.4";
+  overlay.style.transition="opacity 0.3s ease";
+  overlay.style.zIndex=999;
+  document.body.appendChild(overlay);
+
+  setTimeout(()=>{
+    overlay.style.opacity="0";
+    setTimeout(()=>overlay.remove(),300);
+  },duration);
+}
+
+// ======= INPUT =======
+canvas.addEventListener("mousedown",e=>{
+  if(state===GAME_STATE.PLAY){player.vx=(e.clientX<canvas.width/2)?-8:8;}
+});
+canvas.addEventListener("touchstart",e=>{
+  if(state===GAME_STATE.PLAY){
+    const x=e.touches[0].clientX;
+    player.vx=(x<canvas.width/2)?-8:8;
+  }
+});
+window.addEventListener("resize",()=>{canvas.width=innerWidth;canvas.height=innerHeight;});
+
+// ======= BOTÕES =======
+document.getElementById("playButton").onclick=init;
+document.getElementById("restartButton").onclick=init;
+document.getElementById("creditsButton").onclick=()=>{
+  state=GAME_STATE.CREDITS;
+  document.getElementById("menuOverlay").classList.add("hidden");
+  document.getElementById("creditsOverlay").classList.remove("hidden");
+};
+document.getElementById("backButton").onclick=()=>{
+  state=GAME_STATE.MENU;
+  document.getElementById("creditsOverlay").classList.add("hidden");
+  document.getElementById("menuOverlay").classList.remove("hidden");
+};
+
+function loop(){update();draw();requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>
